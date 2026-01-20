@@ -1,14 +1,14 @@
 {
-  "name": "cloud-storage-backend",
+  "name": "storage-backend",
   "version": "1.0.0",
-  "description": "Backend for cloud storage platform",
+  "description": "Backend API for Storage - Secure cloud storage platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["cloud storage", "file storage", "storage api", "file manager"],
+  "author": "Storage",
   "license": "ISC",
   "dependencies": {
     "bcryptjs": "^2.4.3",
