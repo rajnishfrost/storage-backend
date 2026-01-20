@@ -31,6 +31,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: './uploads'
   },
+  storagePaths: {
+    type: [String],
+    default: []
+  },
   isActive: {
     type: Boolean,
     default: true

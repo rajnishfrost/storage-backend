@@ -9,6 +9,7 @@ const userRoutes = require('./routes/users');
 const roleRoutes = require('./routes/roles');
 const fileRoutes = require('./routes/files');
 const folderRoutes = require('./routes/folders');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/folders', folderRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

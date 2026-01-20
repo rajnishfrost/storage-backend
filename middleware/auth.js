@@ -48,4 +48,4 @@ const isSuperAdmin = (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, isAdmin, isSuperAdmin };
+module.exports = { authenticate, isAdmin, isSuperAdmin, requireAdmin: isAdmin };
