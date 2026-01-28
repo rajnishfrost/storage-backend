@@ -9,6 +9,17 @@ const userDetailsSchema = new mongoose.Schema({
     index: true
   },
 
+  // Cached user data from external API (for display purposes)
+  name: {
+    type: String,
+    default: ''
+  },
+
+  email: {
+    type: String,
+    default: ''
+  },
+
   // Storage-specific fields ONLY (not duplicating external API data)
   role: {
     type: mongoose.Schema.Types.ObjectId,

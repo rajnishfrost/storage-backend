@@ -84,6 +84,8 @@ router.post('/', validateExternalToken, isAdmin, async (req, res) => {
     // 2. Create user_details locally
     const userDetails = await UserDetails.create({
       externalUserId,
+      name,
+      email,
       role: roleId,
       roleName: roleDoc.name,
       storageQuota: storageQuota || 5,

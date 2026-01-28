@@ -46,6 +46,8 @@ router.post('/signup', async (req, res) => {
       if (!userDetails) {
         userDetails = await UserDetails.create({
           externalUserId,
+          name,
+          email,
           role: roleDoc._id,
           roleName: roleDoc.name,
           storageQuota,
@@ -116,6 +118,8 @@ router.post('/login', async (req, res) => {
 
       userDetails = await UserDetails.create({
         externalUserId,
+        name,
+        email,
         role: defaultRole._id,
         roleName: 'user',
         storageQuota: 5,
@@ -125,8 +129,14 @@ router.post('/login', async (req, res) => {
       });
 
       await userDetails.populate('role');
+    } else {
+      // Sync name/email from external API if changed
+      if (userDetails.name !== name || userDetails.email !== email) {
+        userDetails.name = name;
+        userDetails.email = email;
+        await userDetails.save();
+      }
     }
-    // No need to sync name/email - external API is source of truth
 
     // 3. Check if user is active
     if (!userDetails.isActive) {

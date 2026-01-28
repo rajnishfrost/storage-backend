@@ -105,6 +105,8 @@ const initializeApp = async () => {
         // Create user_details for super admin
         await UserDetails.create({
           externalUserId,
+          name: 'Super Admin',
+          email: superAdminEmail,
           role: superAdminRole._id,
           roleName: 'super_admin',
           storageQuota: 1000, // 1TB for super admin
@@ -131,6 +133,8 @@ const initializeApp = async () => {
             // Create user_details for existing super admin
             await UserDetails.create({
               externalUserId,
+              name: 'Super Admin',
+              email: superAdminEmail,
               role: superAdminRole._id,
               roleName: 'super_admin',
               storageQuota: 1000,
