@@ -1,51 +1,55 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const UserDetails = require('../models/UserDetails');
 
-// Verify JWT token
-const authenticate = async (req, res, next) => {
+// Check if user is admin or super admin (works with external auth)
+// This middleware should be used AFTER validateExternalToken
+const isAdmin = async (req, res, next) => {
   try {
-    // Accept token from header or query parameter (for file viewing in iframe/img/video tags)
-    let token = req.header('Authorization')?.replace('Bearer ', '');
+    // req.user contains { _id, name, email } from external API
+    const userDetails = await UserDetails.findOne({
+      externalUserId: req.user._id
+    }).populate('role');
 
-    if (!token && req.query.token) {
-      token = req.query.token;
+    if (!userDetails) {
+      return res.status(403).json({ error: 'User details not found' });
     }
 
-    if (!token) {
-      return res.status(401).json({ error: 'No authentication token provided' });
+    if (userDetails.roleName === 'admin' || userDetails.roleName === 'super_admin') {
+      // Attach userDetails to request for later use
+      req.userDetails = userDetails;
+      next();
+    } else {
+      res.status(403).json({ error: 'Access denied. Admin privileges required.' });
     }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.userId).populate('role');
-
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: 'User not found or inactive' });
-    }
-
-    req.user = user;
-    req.userId = user._id;
-    next();
   } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
+    console.error('isAdmin error:', error);
+    res.status(500).json({ error: 'Authorization check failed' });
   }
 };
 
-// Check if user is admin or super admin
-const isAdmin = (req, res, next) => {
-  if (req.user.role && (req.user.role.name === 'admin' || req.user.role.name === 'super_admin')) {
-    next();
-  } else {
-    res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+// Check if user is super admin (works with external auth)
+// This middleware should be used AFTER validateExternalToken
+const isSuperAdmin = async (req, res, next) => {
+  try {
+    // req.user contains { _id, name, email } from external API
+    const userDetails = await UserDetails.findOne({
+      externalUserId: req.user._id
+    }).populate('role');
+
+    if (!userDetails) {
+      return res.status(403).json({ error: 'User details not found' });
+    }
+
+    if (userDetails.roleName === 'super_admin') {
+      // Attach userDetails to request for later use
+      req.userDetails = userDetails;
+      next();
+    } else {
+      res.status(403).json({ error: 'Access denied. Super admin privileges required.' });
+    }
+  } catch (error) {
+    console.error('isSuperAdmin error:', error);
+    res.status(500).json({ error: 'Authorization check failed' });
   }
 };
 
-// Check if user is super admin
-const isSuperAdmin = (req, res, next) => {
-  if (req.user.role && req.user.role.name === 'super_admin') {
-    next();
-  } else {
-    res.status(403).json({ error: 'Access denied. Super admin privileges required.' });
-  }
-};
-
-module.exports = { authenticate, isAdmin, isSuperAdmin, requireAdmin: isAdmin };
+module.exports = { isAdmin, isSuperAdmin, requireAdmin: isAdmin };

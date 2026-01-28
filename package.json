@@ -7,10 +7,16 @@
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["cloud storage", "file storage", "storage api", "file manager"],
+  "keywords": [
+    "cloud storage",
+    "file storage",
+    "storage api",
+    "file manager"
+  ],
   "author": "Storage",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.13.4",
     "bcryptjs": "^2.4.3",
     "check-disk-space": "^3.4.0",
     "cors": "^2.8.5",

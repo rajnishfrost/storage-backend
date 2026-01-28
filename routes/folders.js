@@ -4,13 +4,13 @@ const path = require('path');
 const fs = require('fs-extra');
 const Folder = require('../models/Folder');
 const File = require('../models/File');
-const User = require('../models/User');
-const { authenticate } = require('../middleware/auth');
+const UserDetails = require('../models/UserDetails');
+const validateExternalToken = require('../middleware/validateExternalToken');
 
 // Get all folders for current user (all folders regardless of parent)
-router.get('/all', authenticate, async (req, res) => {
+router.get('/all', validateExternalToken, async (req, res) => {
   try {
-    const folders = await Folder.find({ owner: req.userId }).sort({ name: 1 });
+    const folders = await Folder.find({ owner: req.user._id }).sort({ name: 1 });
     res.json(folders);
   } catch (error) {
     console.error('Get all folders error:', error);
@@ -19,11 +19,11 @@ router.get('/all', authenticate, async (req, res) => {
 });
 
 // Get all folders for current user
-router.get('/', authenticate, async (req, res) => {
+router.get('/', validateExternalToken, async (req, res) => {
   try {
     const { parent } = req.query;
 
-    const query = { owner: req.userId };
+    const query = { owner: req.user._id };
 
     if (parent) {
       query.parent = parent;
@@ -41,7 +41,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Create new folder
-router.post('/', authenticate, async (req, res) => {
+router.post('/', validateExternalToken, async (req, res) => {
   try {
     const { name, parent } = req.body;
 
@@ -53,18 +53,24 @@ router.post('/', authenticate, async (req, res) => {
     const existingFolder = await Folder.findOne({
       name,
       parent: parent || null,
-      owner: req.userId
+      owner: req.user._id
     });
 
     if (existingFolder) {
       return res.status(400).json({ error: 'Folder with this name already exists' });
     }
 
+    // Get user details for storage path
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
+    if (!userDetails) {
+      return res.status(404).json({ error: 'User details not found' });
+    }
+
     // Create folder path
-    let folderPath = path.join(req.user.storagePath, req.userId.toString());
+    let folderPath = path.join(userDetails.storagePath, req.user._id.toString());
 
     if (parent) {
-      const parentFolder = await Folder.findOne({ _id: parent, owner: req.userId });
+      const parentFolder = await Folder.findOne({ _id: parent, owner: req.user._id });
       if (!parentFolder) {
         return res.status(404).json({ error: 'Parent folder not found' });
       }
@@ -79,7 +85,7 @@ router.post('/', authenticate, async (req, res) => {
     // Create folder in database
     const folder = new Folder({
       name,
-      owner: req.userId,
+      owner: req.user._id,
       parent: parent || null,
       path: folderPath
     });
@@ -151,7 +157,7 @@ async function updateSubfolderPaths(folderId, oldPath, newPath) {
 }
 
 // Rename folder
-router.put('/:folderId/rename', authenticate, async (req, res) => {
+router.put('/:folderId/rename', validateExternalToken, async (req, res) => {
   try {
     const { folderId } = req.params;
     const { newName } = req.body;
@@ -160,7 +166,7 @@ router.put('/:folderId/rename', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'New folder name is required' });
     }
 
-    const folder = await Folder.findOne({ _id: folderId, owner: req.userId });
+    const folder = await Folder.findOne({ _id: folderId, owner: req.user._id });
 
     if (!folder) {
       return res.status(404).json({ error: 'Folder not found' });
@@ -170,7 +176,7 @@ router.put('/:folderId/rename', authenticate, async (req, res) => {
     const existingFolder = await Folder.findOne({
       name: newName.trim(),
       parent: folder.parent,
-      owner: req.userId,
+      owner: req.user._id,
       _id: { $ne: folderId } // Exclude current folder
     });
 
@@ -202,24 +208,25 @@ router.put('/:folderId/rename', authenticate, async (req, res) => {
 });
 
 // Delete folder
-router.delete('/:folderId', authenticate, async (req, res) => {
+router.delete('/:folderId', validateExternalToken, async (req, res) => {
   try {
     const { folderId } = req.params;
 
-    const folder = await Folder.findOne({ _id: folderId, owner: req.userId });
+    const folder = await Folder.findOne({ _id: folderId, owner: req.user._id });
 
     if (!folder) {
       return res.status(404).json({ error: 'Folder not found' });
     }
 
     // Recursively delete folder and all its contents
-    const deletedSize = await deleteFolderRecursive(folderId, req.userId);
+    const deletedSize = await deleteFolderRecursive(folderId, req.user._id);
 
     // Update user's used storage
     if (deletedSize > 0) {
-      await User.findByIdAndUpdate(req.userId, {
-        $inc: { usedStorage: -deletedSize }
-      });
+      await UserDetails.findOneAndUpdate(
+        { externalUserId: req.user._id },
+        { $inc: { usedStorage: -deletedSize } }
+      );
     }
 
     res.json({ message: 'Folder deleted successfully' });
@@ -230,7 +237,7 @@ router.delete('/:folderId', authenticate, async (req, res) => {
 });
 
 // Bulk move folders
-router.put('/bulk-move', authenticate, async (req, res) => {
+router.put('/bulk-move', validateExternalToken, async (req, res) => {
   try {
     const { folderIds, targetFolderId } = req.body;
 
@@ -238,10 +245,16 @@ router.put('/bulk-move', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'No folders specified' });
     }
 
+    // Get user details for storage path
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
+    if (!userDetails) {
+      return res.status(404).json({ error: 'User details not found' });
+    }
+
     // Get target folder path if provided
-    let targetPath = path.join(req.user.storagePath, req.userId.toString());
+    let targetPath = path.join(userDetails.storagePath, req.user._id.toString());
     if (targetFolderId) {
-      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.userId });
+      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.user._id });
       if (!targetFolder) {
         return res.status(404).json({ error: 'Target folder not found' });
       }
@@ -251,7 +264,7 @@ router.put('/bulk-move', authenticate, async (req, res) => {
     const movedFolders = [];
 
     for (const folderId of folderIds) {
-      const folder = await Folder.findOne({ _id: folderId, owner: req.userId });
+      const folder = await Folder.findOne({ _id: folderId, owner: req.user._id });
       if (!folder) continue;
 
       // Prevent moving folder into itself or its subfolders
@@ -282,7 +295,7 @@ router.put('/bulk-move', authenticate, async (req, res) => {
 });
 
 // Bulk copy folders
-router.post('/bulk-copy', authenticate, async (req, res) => {
+router.post('/bulk-copy', validateExternalToken, async (req, res) => {
   try {
     const { folderIds, targetFolderId } = req.body;
 
@@ -290,10 +303,16 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'No folders specified' });
     }
 
+    // Get user details for storage path
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
+    if (!userDetails) {
+      return res.status(404).json({ error: 'User details not found' });
+    }
+
     // Get target folder path if provided
-    let targetPath = path.join(req.user.storagePath, req.userId.toString());
+    let targetPath = path.join(userDetails.storagePath, req.user._id.toString());
     if (targetFolderId) {
-      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.userId });
+      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.user._id });
       if (!targetFolder) {
         return res.status(404).json({ error: 'Target folder not found' });
       }
@@ -303,7 +322,7 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
     const copiedFolders = [];
 
     for (const folderId of folderIds) {
-      const folder = await Folder.findOne({ _id: folderId, owner: req.userId });
+      const folder = await Folder.findOne({ _id: folderId, owner: req.user._id });
       if (!folder) continue;
 
       const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -316,7 +335,7 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
       // Create new database entry
       const newFolder = new Folder({
         name: newFolderName,
-        owner: req.userId,
+        owner: req.user._id,
         parent: targetFolderId || null,
         path: newPath
       });

@@ -5,18 +5,25 @@ const fs = require('fs-extra');
 const multer = require('multer');
 const File = require('../models/File');
 const Folder = require('../models/Folder');
-const User = require('../models/User');
-const { authenticate } = require('../middleware/auth');
+const UserDetails = require('../models/UserDetails');
+const validateExternalToken = require('../middleware/validateExternalToken');
 const { extractMetadata } = require('../utils/metadataExtractor');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     try {
-      let uploadPath = path.join(req.user.storagePath, req.userId.toString());
+      // Get user details for storage path
+      const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
+
+      if (!userDetails) {
+        return cb(new Error('User details not found'));
+      }
+
+      let uploadPath = path.join(userDetails.storagePath, req.user._id.toString());
 
       if (req.body.folderId) {
-        const folder = await Folder.findOne({ _id: req.body.folderId, owner: req.userId });
+        const folder = await Folder.findOne({ _id: req.body.folderId, owner: req.user._id });
         if (folder) {
           uploadPath = folder.path;
         }
@@ -43,11 +50,11 @@ const upload = multer({
 });
 
 // Get all files for current user with pagination
-router.get('/', authenticate, async (req, res) => {
+router.get('/', validateExternalToken, async (req, res) => {
   try {
     const { folder, page = 1, limit = 100 } = req.query;
 
-    const query = { owner: req.userId };
+    const query = { owner: req.user._id };
 
     if (folder) {
       query.folder = folder;
@@ -99,7 +106,7 @@ const handleMulterError = (err, req, res, next) => {
 };
 
 // Upload files (multiple)
-router.post('/upload', authenticate, upload.array('files', 10), handleMulterError, async (req, res) => {
+router.post('/upload', validateExternalToken, upload.array('files', 10), handleMulterError, async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'No files uploaded' });
@@ -126,7 +133,7 @@ router.post('/upload', authenticate, upload.array('files', 10), handleMulterErro
       const existingFile = await File.findOne({
         originalName: file.originalname,
         folder: folderId || null,
-        owner: req.userId
+        owner: req.user._id
       });
 
       if (existingFile) {
@@ -146,7 +153,7 @@ router.post('/upload', authenticate, upload.array('files', 10), handleMulterErro
         mimeType: file.mimetype,
         size: file.size,
         path: file.path,
-        owner: req.userId,
+        owner: req.user._id,
         folder: folderId || null,
         fileType,
         metadata
@@ -157,9 +164,10 @@ router.post('/upload', authenticate, upload.array('files', 10), handleMulterErro
     }
 
     // Update user's used storage
-    await User.findByIdAndUpdate(req.userId, {
-      $inc: { usedStorage: totalSize }
-    });
+    await UserDetails.findOneAndUpdate(
+      { externalUserId: req.user._id },
+      { $inc: { usedStorage: totalSize } }
+    );
 
     res.status(201).json({
       message: 'Files uploaded successfully',
@@ -180,11 +188,11 @@ router.post('/upload', authenticate, upload.array('files', 10), handleMulterErro
 });
 
 // Download file
-router.get('/download/:fileId', authenticate, async (req, res) => {
+router.get('/download/:fileId', validateExternalToken, async (req, res) => {
   try {
     const { fileId } = req.params;
 
-    const file = await File.findOne({ _id: fileId, owner: req.userId });
+    const file = await File.findOne({ _id: fileId, owner: req.user._id });
 
     if (!file) {
       return res.status(404).json({ error: 'File not found' });
@@ -204,11 +212,11 @@ router.get('/download/:fileId', authenticate, async (req, res) => {
 });
 
 // View file (stream for videos, images, pdfs)
-router.get('/view/:fileId', authenticate, async (req, res) => {
+router.get('/view/:fileId', validateExternalToken, async (req, res) => {
   try {
     const { fileId } = req.params;
 
-    const file = await File.findOne({ _id: fileId, owner: req.userId });
+    const file = await File.findOne({ _id: fileId, owner: req.user._id });
 
     if (!file) {
       return res.status(404).json({ error: 'File not found' });
@@ -257,7 +265,7 @@ router.get('/view/:fileId', authenticate, async (req, res) => {
 });
 
 // Bulk move files
-router.put('/bulk-move', authenticate, async (req, res) => {
+router.put('/bulk-move', validateExternalToken, async (req, res) => {
   try {
     const { fileIds, targetFolderId } = req.body;
 
@@ -266,9 +274,9 @@ router.put('/bulk-move', authenticate, async (req, res) => {
     }
 
     // Get target folder path if provided
-    let targetPath = path.join(req.user.storagePath, req.userId.toString());
+    let targetPath = path.join(req.user.storagePath, req.user._id.toString());
     if (targetFolderId) {
-      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.userId });
+      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.user._id });
       if (!targetFolder) {
         return res.status(404).json({ error: 'Target folder not found' });
       }
@@ -278,7 +286,7 @@ router.put('/bulk-move', authenticate, async (req, res) => {
     const movedFiles = [];
 
     for (const fileId of fileIds) {
-      const file = await File.findOne({ _id: fileId, owner: req.userId });
+      const file = await File.findOne({ _id: fileId, owner: req.user._id });
       if (!file) continue;
 
       const oldPath = file.path;
@@ -306,7 +314,7 @@ router.put('/bulk-move', authenticate, async (req, res) => {
 });
 
 // Bulk copy files
-router.post('/bulk-copy', authenticate, async (req, res) => {
+router.post('/bulk-copy', validateExternalToken, async (req, res) => {
   try {
     const { fileIds, targetFolderId } = req.body;
 
@@ -315,9 +323,9 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
     }
 
     // Get target folder path if provided
-    let targetPath = path.join(req.user.storagePath, req.userId.toString());
+    let targetPath = path.join(req.user.storagePath, req.user._id.toString());
     if (targetFolderId) {
-      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.userId });
+      const targetFolder = await Folder.findOne({ _id: targetFolderId, owner: req.user._id });
       if (!targetFolder) {
         return res.status(404).json({ error: 'Target folder not found' });
       }
@@ -328,7 +336,7 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
     let totalCopySize = 0;
 
     for (const fileId of fileIds) {
-      const file = await File.findOne({ _id: fileId, owner: req.userId });
+      const file = await File.findOne({ _id: fileId, owner: req.user._id });
       if (!file) continue;
 
       totalCopySize += file.size;
@@ -340,7 +348,7 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
     }
 
     for (const fileId of fileIds) {
-      const file = await File.findOne({ _id: fileId, owner: req.userId });
+      const file = await File.findOne({ _id: fileId, owner: req.user._id });
       if (!file) continue;
 
       const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -357,7 +365,7 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
         mimeType: file.mimeType,
         size: file.size,
         path: newPath,
-        owner: req.userId,
+        owner: req.user._id,
         folder: targetFolderId || null,
         fileType: file.fileType
       });
@@ -367,9 +375,10 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
     }
 
     // Update user's used storage
-    await User.findByIdAndUpdate(req.userId, {
-      $inc: { usedStorage: totalCopySize }
-    });
+    await UserDetails.findOneAndUpdate(
+      { externalUserId: req.user._id },
+      { $inc: { usedStorage: totalCopySize } }
+    );
 
     res.json({
       message: `${copiedFiles.length} file(s) copied successfully`,
@@ -382,11 +391,11 @@ router.post('/bulk-copy', authenticate, async (req, res) => {
 });
 
 // Delete file
-router.delete('/:fileId', authenticate, async (req, res) => {
+router.delete('/:fileId', validateExternalToken, async (req, res) => {
   try {
     const { fileId } = req.params;
 
-    const file = await File.findOne({ _id: fileId, owner: req.userId });
+    const file = await File.findOne({ _id: fileId, owner: req.user._id });
 
     if (!file) {
       return res.status(404).json({ error: 'File not found' });
@@ -396,9 +405,10 @@ router.delete('/:fileId', authenticate, async (req, res) => {
     await fs.remove(file.path).catch(() => {});
 
     // Update user's used storage
-    await User.findByIdAndUpdate(req.userId, {
-      $inc: { usedStorage: -file.size }
-    });
+    await UserDetails.findOneAndUpdate(
+      { externalUserId: req.user._id },
+      { $inc: { usedStorage: -file.size } }
+    );
 
     // Delete from database
     await File.findByIdAndDelete(fileId);

@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const Role = require('../models/Role');
-const { authenticate, isSuperAdmin } = require('../middleware/auth');
+const validateExternalToken = require('../middleware/validateExternalToken');
+const { isSuperAdmin } = require('../middleware/auth');
 
 // Get all roles
-router.get('/', authenticate, async (req, res) => {
+router.get('/', validateExternalToken, async (req, res) => {
   try {
     const roles = await Role.find().sort({ createdAt: 1 });
     res.json(roles);
@@ -15,7 +16,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Create new role (super admin only)
-router.post('/', authenticate, isSuperAdmin, async (req, res) => {
+router.post('/', validateExternalToken, isSuperAdmin, async (req, res) => {
   try {
     const { name, displayName, description, permissions } = req.body;
 
@@ -47,7 +48,7 @@ router.post('/', authenticate, isSuperAdmin, async (req, res) => {
 });
 
 // Update role (super admin only)
-router.put('/:roleId', authenticate, isSuperAdmin, async (req, res) => {
+router.put('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) => {
   try {
     const { roleId } = req.params;
     const { displayName, description, permissions } = req.body;
@@ -77,7 +78,7 @@ router.put('/:roleId', authenticate, isSuperAdmin, async (req, res) => {
 });
 
 // Delete role (super admin only)
-router.delete('/:roleId', authenticate, isSuperAdmin, async (req, res) => {
+router.delete('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) => {
   try {
     const { roleId } = req.params;
 
@@ -93,8 +94,8 @@ router.delete('/:roleId', authenticate, isSuperAdmin, async (req, res) => {
     }
 
     // Check if any users have this role
-    const User = require('../models/User');
-    const usersWithRole = await User.countDocuments({ role: roleId });
+    const UserDetails = require('../models/UserDetails');
+    const usersWithRole = await UserDetails.countDocuments({ role: roleId });
 
     if (usersWithRole > 0) {
       return res.status(400).json({

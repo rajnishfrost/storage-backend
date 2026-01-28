@@ -1,40 +1,36 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
-const { authenticate, isAdmin } = require('../middleware/auth');
+const UserDetails = require('../models/UserDetails');
+const validateExternalToken = require('../middleware/validateExternalToken');
+const { isAdmin } = require('../middleware/auth');
 
 // Get all users (admin only)
-router.get('/', authenticate, isAdmin, async (req, res) => {
+router.get('/', validateExternalToken, isAdmin, async (req, res) => {
   try {
     const Role = require('../models/Role');
     const superAdminRole = await Role.findOne({ name: 'super_admin' });
 
-    const users = await User.find({ role: { $ne: superAdminRole._id } })
-      .select('-password')
+    const userDetails = await UserDetails.find({ role: { $ne: superAdminRole._id } })
       .populate('role')
       .sort({ createdAt: -1 });
 
-    res.json(users);
+    res.json(userDetails);
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Create new user (admin only)
-router.post('/', authenticate, isAdmin, async (req, res) => {
+// Create new user (admin only) - Creates user in external API + local user_details
+router.post('/', validateExternalToken, isAdmin, async (req, res) => {
   try {
-    const { email, password, roleId, storageQuota, storagePath } = req.body;
+    const axios = require('axios');
+    const { name, email, password, roleId, storageQuota, storagePath } = req.body;
+    const EXTERNAL_AUTH_API = process.env.EXTERNAL_AUTH_API || 'http://161.118.173.163:4000';
 
     // Validation
-    if (!email || !password || !roleId) {
-      return res.status(400).json({ error: 'Email, password and role are required' });
-    }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: 'User with this email already exists' });
+    if (!name || !email || !password || !roleId) {
+      return res.status(400).json({ error: 'Name, email, password and role are required' });
     }
 
     // Check if role exists
@@ -45,7 +41,7 @@ router.post('/', authenticate, isAdmin, async (req, res) => {
     }
 
     // Only super admin can create admin users
-    if (roleDoc.name === 'admin' && req.user.role.name !== 'super_admin') {
+    if (roleDoc.name === 'admin' && req.userDetails.roleName !== 'super_admin') {
       return res.status(403).json({ error: 'Only super admin can create admin users' });
     }
 
@@ -53,10 +49,8 @@ router.post('/', authenticate, isAdmin, async (req, res) => {
     const finalStoragePath = storagePath || process.env.UPLOAD_PATH || './uploads';
     if (storagePath && storagePath.trim() !== '') {
       const fs = require('fs-extra');
-      const path = require('path');
 
       try {
-        // Check if the directory exists
         const exists = await fs.pathExists(storagePath);
         if (!exists) {
           return res.status(400).json({
@@ -64,7 +58,6 @@ router.post('/', authenticate, isAdmin, async (req, res) => {
           });
         }
 
-        // Check if we can write to the directory
         await fs.access(storagePath, fs.constants.W_OK);
       } catch (accessError) {
         return res.status(400).json({
@@ -73,26 +66,42 @@ router.post('/', authenticate, isAdmin, async (req, res) => {
       }
     }
 
-    // Create user
-    const user = new User({
-      email,
-      password,
+    // 1. Create user in external API
+    let externalResponse;
+    try {
+      externalResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/signup`, {
+        name,
+        email,
+        password
+      });
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.response?.data?.error || 'Signup failed';
+      return res.status(error.response?.status || 400).json({ error: errorMessage });
+    }
+
+    const { _id: externalUserId } = externalResponse.data;
+
+    // 2. Create user_details locally
+    const userDetails = await UserDetails.create({
+      externalUserId,
       role: roleId,
+      roleName: roleDoc.name,
       storageQuota: storageQuota || 5,
+      usedStorage: 0,
       storagePath: finalStoragePath,
-      createdBy: req.userId
+      isActive: true,
+      createdBy: req.user._id
     });
 
-    await user.save();
-    await user.populate('role');
+    await userDetails.populate('role');
 
     res.status(201).json({
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      storageQuota: user.storageQuota,
-      storagePath: user.storagePath,
-      isActive: user.isActive
+      id: userDetails._id,
+      externalUserId: userDetails.externalUserId,
+      role: userDetails.role,
+      storageQuota: userDetails.storageQuota,
+      storagePath: userDetails.storagePath,
+      isActive: userDetails.isActive
     });
   } catch (error) {
     console.error('Create user error:', error);
@@ -100,20 +109,20 @@ router.post('/', authenticate, isAdmin, async (req, res) => {
   }
 });
 
-// Update user (admin only)
-router.put('/:userId', authenticate, isAdmin, async (req, res) => {
+// Update user (admin only) - Updates user_details only (passwords managed via external API)
+router.put('/:userId', validateExternalToken, isAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { storageQuota, storagePath, isActive, roleId, password } = req.body;
+    const { storageQuota, storagePath, isActive, roleId } = req.body;
 
-    const user = await User.findById(userId).populate('role');
+    const userDetails = await UserDetails.findById(userId).populate('role');
 
-    if (!user) {
+    if (!userDetails) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Prevent modifying super admin
-    if (user.role && user.role.name === 'super_admin') {
+    if (userDetails.roleName === 'super_admin') {
       return res.status(403).json({ error: 'Cannot modify super admin' });
     }
 
@@ -127,11 +136,12 @@ router.put('/:userId', authenticate, isAdmin, async (req, res) => {
       }
 
       // Only super admin can change roles to admin
-      if (newRole.name === 'admin' && req.user.role.name !== 'super_admin') {
+      if (newRole.name === 'admin' && req.userDetails.roleName !== 'super_admin') {
         return res.status(403).json({ error: 'Only super admin can create admin users' });
       }
 
-      user.role = roleId;
+      userDetails.role = roleId;
+      userDetails.roleName = newRole.name;
     }
 
     // Validate custom storage path if being updated
@@ -139,7 +149,6 @@ router.put('/:userId', authenticate, isAdmin, async (req, res) => {
       const fs = require('fs-extra');
 
       try {
-        // Check if the directory exists
         const exists = await fs.pathExists(storagePath);
         if (!exists) {
           return res.status(400).json({
@@ -147,7 +156,6 @@ router.put('/:userId', authenticate, isAdmin, async (req, res) => {
           });
         }
 
-        // Check if we can write to the directory
         await fs.access(storagePath, fs.constants.W_OK);
       } catch (accessError) {
         return res.status(400).json({
@@ -156,25 +164,23 @@ router.put('/:userId', authenticate, isAdmin, async (req, res) => {
       }
     }
 
-    // Update fields
-    if (storageQuota !== undefined) user.storageQuota = storageQuota;
-    if (storagePath !== undefined) user.storagePath = storagePath;
-    if (isActive !== undefined) user.isActive = isActive;
-    if (password && password.trim() !== '') {
-      user.password = password; // Will be hashed by pre-save hook
-    }
+    // Update fields (password changes must be done via external API)
+    if (storageQuota !== undefined) userDetails.storageQuota = storageQuota;
+    if (storagePath !== undefined) userDetails.storagePath = storagePath;
+    if (isActive !== undefined) userDetails.isActive = isActive;
 
-    await user.save();
-    await user.populate('role');
+    await userDetails.save();
+    await userDetails.populate('role');
 
     res.json({
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      storageQuota: user.storageQuota,
-      storagePath: user.storagePath,
-      isActive: user.isActive,
-      usedStorage: user.usedStorage
+      id: userDetails._id,
+      externalUserId: userDetails.externalUserId,
+      role: userDetails.role,
+      roleName: userDetails.roleName,
+      storageQuota: userDetails.storageQuota,
+      storagePath: userDetails.storagePath,
+      isActive: userDetails.isActive,
+      usedStorage: userDetails.usedStorage
     });
   } catch (error) {
     console.error('Update user error:', error);
@@ -182,25 +188,25 @@ router.put('/:userId', authenticate, isAdmin, async (req, res) => {
   }
 });
 
-// Delete user (admin only)
-router.delete('/:userId', authenticate, isAdmin, async (req, res) => {
+// Delete user (admin only) - Deletes user_details only (external API user remains)
+router.delete('/:userId', validateExternalToken, isAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await User.findById(userId).populate('role');
+    const userDetails = await UserDetails.findById(userId).populate('role');
 
-    if (!user) {
+    if (!userDetails) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Prevent deleting super admin
-    if (user.role && user.role.name === 'super_admin') {
+    if (userDetails.roleName === 'super_admin') {
       return res.status(403).json({ error: 'Cannot delete super admin' });
     }
 
-    await User.findByIdAndDelete(userId);
+    await UserDetails.findByIdAndDelete(userId);
 
-    res.json({ message: 'User deleted successfully' });
+    res.json({ message: 'User details deleted successfully' });
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Server error' });

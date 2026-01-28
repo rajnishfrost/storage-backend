@@ -77,50 +77,77 @@ const initializeApp = async () => {
 
     // Get role IDs
     const superAdminRole = await Role.findOne({ name: 'super_admin' });
-    const adminRole = await Role.findOne({ name: 'admin' });
-    const userRole = await Role.findOne({ name: 'user' });
 
-    // Migrate existing users from string role to ObjectId role
-    const User = require('./models/User');
+    // Create super admin in external API + local user_details if not exists
+    const UserDetails = require('./models/UserDetails');
+    const axios = require('axios');
+    const EXTERNAL_AUTH_API = process.env.EXTERNAL_AUTH_API || 'http://161.118.173.163:4000';
 
-    // Use native MongoDB collection to bypass schema validation for migration
-    const usersCollection = mongoose.connection.collection('users');
-    const usersWithStringRole = await usersCollection.find({
-      role: { $type: 'string' }
-    }).toArray();
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'superadmin@cloudstore.com';
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@123';
 
-    for (const user of usersWithStringRole) {
-      let newRoleId;
-      if (user.role === 'super_admin') {
-        newRoleId = superAdminRole._id;
-      } else if (user.role === 'admin') {
-        newRoleId = adminRole._id;
-      } else {
-        newRoleId = userRole._id;
-      }
-
-      await usersCollection.updateOne(
-        { _id: user._id },
-        { $set: { role: newRoleId } }
-      );
-      console.log(`Migrated user ${user.email} role to ObjectId`);
-    }
-
-    // Create super admin if not exists
-    const superAdminExists = await User.findOne({ role: superAdminRole._id });
+    // Check if super admin user_details exists
+    const superAdminExists = await UserDetails.findOne({ role: superAdminRole._id });
 
     if (!superAdminExists) {
-      const superAdmin = new User({
-        email: process.env.SUPER_ADMIN_EMAIL || 'superadmin@cloudstore.com',
-        password: process.env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@123',
-        role: superAdminRole._id,
-        storageQuota: 1000, // 1TB for super admin
-        storagePath: process.env.UPLOAD_PATH || './uploads'
-      });
+      try {
+        console.log('Creating super admin in external API...');
 
-      await superAdmin.save();
-      console.log('Super admin created successfully');
-      console.log('Email:', superAdmin.email);
+        // Try to create super admin in external API
+        const signupResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/signup`, {
+          name: 'Super Admin',
+          email: superAdminEmail,
+          password: superAdminPassword
+        });
+
+        const { _id: externalUserId } = signupResponse.data;
+
+        // Create user_details for super admin
+        await UserDetails.create({
+          externalUserId,
+          role: superAdminRole._id,
+          roleName: 'super_admin',
+          storageQuota: 1000, // 1TB for super admin
+          usedStorage: 0,
+          storagePath: process.env.UPLOAD_PATH || './uploads',
+          isActive: true
+        });
+
+        console.log('Super admin created successfully');
+        console.log('Email:', superAdminEmail);
+      } catch (error) {
+        // If signup fails (e.g., user already exists in external API), try to login
+        if (error.response?.status === 400) {
+          console.log('Super admin may already exist in external API, attempting login...');
+
+          try {
+            const loginResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/login`, {
+              email: superAdminEmail,
+              password: superAdminPassword
+            });
+
+            const { _id: externalUserId } = loginResponse.data;
+
+            // Create user_details for existing super admin
+            await UserDetails.create({
+              externalUserId,
+              role: superAdminRole._id,
+              roleName: 'super_admin',
+              storageQuota: 1000,
+              usedStorage: 0,
+              storagePath: process.env.UPLOAD_PATH || './uploads',
+              isActive: true
+            });
+
+            console.log('Super admin user_details created successfully');
+            console.log('Email:', superAdminEmail);
+          } catch (loginError) {
+            console.error('Failed to create/link super admin:', loginError.message);
+          }
+        } else {
+          console.error('Failed to create super admin:', error.message);
+        }
+      }
     }
 
     // Start server - bind to 0.0.0.0 to allow network access

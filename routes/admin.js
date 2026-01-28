@@ -2,21 +2,22 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const User = require('../models/User');
-const { authenticate, requireAdmin } = require('../middleware/auth');
+const UserDetails = require('../models/UserDetails');
+const validateExternalToken = require('../middleware/validateExternalToken');
+const { requireAdmin } = require('../middleware/auth');
 
 // Get storage paths with disk space info
-router.get('/storage-paths', authenticate, requireAdmin, async (req, res) => {
+router.get('/storage-paths', validateExternalToken, requireAdmin, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
 
-    if (!user.storagePaths || user.storagePaths.length === 0) {
+    if (!userDetails.storagePaths || userDetails.storagePaths.length === 0) {
       return res.json({ paths: [] });
     }
 
     // Get disk space info for each path
     const pathsWithInfo = await Promise.all(
-      user.storagePaths.map(async (storagePath) => {
+      userDetails.storagePaths.map(async (storagePath) => {
         try {
           // Check if path exists
           if (!fs.existsSync(storagePath)) {
@@ -54,7 +55,7 @@ router.get('/storage-paths', authenticate, requireAdmin, async (req, res) => {
 });
 
 // Add storage path
-router.post('/storage-paths', authenticate, requireAdmin, async (req, res) => {
+router.post('/storage-paths', validateExternalToken, requireAdmin, async (req, res) => {
   try {
     const { path: storagePath } = req.body;
 
@@ -80,26 +81,26 @@ router.post('/storage-paths', authenticate, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'No write permission for this path' });
     }
 
-    const user = await User.findById(req.user._id);
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
 
     // Initialize storagePaths if not exists
-    if (!user.storagePaths) {
-      user.storagePaths = [];
+    if (!userDetails.storagePaths) {
+      userDetails.storagePaths = [];
     }
 
     // Check if path already exists
-    if (user.storagePaths.includes(storagePath)) {
+    if (userDetails.storagePaths.includes(storagePath)) {
       return res.status(400).json({ error: 'Path already exists' });
     }
 
     // Add path
-    user.storagePaths.push(storagePath);
-    await user.save();
+    userDetails.storagePaths.push(storagePath);
+    await userDetails.save();
 
     // Get updated paths with disk space info
     const checkDiskSpace = require('check-disk-space').default;
     const pathsWithInfo = await Promise.all(
-      user.storagePaths.map(async (path) => {
+      userDetails.storagePaths.map(async (path) => {
         try {
           const diskSpace = await checkDiskSpace(path);
           return {
@@ -125,7 +126,7 @@ router.post('/storage-paths', authenticate, requireAdmin, async (req, res) => {
 });
 
 // Remove storage path
-router.delete('/storage-paths', authenticate, requireAdmin, async (req, res) => {
+router.delete('/storage-paths', validateExternalToken, requireAdmin, async (req, res) => {
   try {
     const { path: storagePath } = req.body;
 
@@ -133,20 +134,20 @@ router.delete('/storage-paths', authenticate, requireAdmin, async (req, res) => 
       return res.status(400).json({ error: 'Storage path is required' });
     }
 
-    const user = await User.findById(req.user._id);
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
 
-    if (!user.storagePaths || user.storagePaths.length === 0) {
+    if (!userDetails.storagePaths || userDetails.storagePaths.length === 0) {
       return res.status(400).json({ error: 'No storage paths configured' });
     }
 
     // Remove path
-    user.storagePaths = user.storagePaths.filter(p => p !== storagePath);
-    await user.save();
+    userDetails.storagePaths = userDetails.storagePaths.filter(p => p !== storagePath);
+    await userDetails.save();
 
     // Get updated paths with disk space info
     const checkDiskSpace = require('check-disk-space').default;
     const pathsWithInfo = await Promise.all(
-      user.storagePaths.map(async (path) => {
+      userDetails.storagePaths.map(async (path) => {
         try {
           const diskSpace = await checkDiskSpace(path);
           return {
