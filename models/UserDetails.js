@@ -87,4 +87,10 @@ userDetailsSchema.methods.getAvailableStorage = function() {
   return quotaInBytes - this.usedStorage;
 };
 
+// Method to check if user has enough space for a given size
+userDetailsSchema.methods.hasSpace = function(sizeInBytes) {
+  const availableStorage = this.getAvailableStorage();
+  return availableStorage >= sizeInBytes;
+};
+
 module.exports = mongoose.model('UserDetails', userDetailsSchema);

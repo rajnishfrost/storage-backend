@@ -114,11 +114,22 @@ router.post('/upload', validateExternalToken, upload.array('files', 10), handleM
 
     const { folderId } = req.body;
 
+    // Get user details for storage quota check
+    const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
+
+    if (!userDetails) {
+      // Delete uploaded files
+      for (const file of req.files) {
+        await fs.remove(file.path);
+      }
+      return res.status(404).json({ error: 'User details not found' });
+    }
+
     // Calculate total size
     const totalSize = req.files.reduce((sum, file) => sum + file.size, 0);
 
     // Check storage quota
-    if (!req.user.hasSpace(totalSize)) {
+    if (!userDetails.hasSpace(totalSize)) {
       // Delete uploaded files
       for (const file of req.files) {
         await fs.remove(file.path);
