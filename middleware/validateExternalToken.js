@@ -8,14 +8,18 @@ const EXTERNAL_AUTH_API = process.env.EXTERNAL_AUTH_API || 'http://161.118.173.1
  */
 const validateExternalToken = async (req, res, next) => {
   try {
-    // Extract token from Authorization header
+    // Extract token from Authorization header or query parameter
     const authHeader = req.headers.authorization;
+    let token;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.replace('Bearer ', '');
+    } else if (req.query.token) {
+      // Support token in query parameter for iframe/img/video/audio tags
+      token = req.query.token;
+    } else {
       return res.status(401).json({ error: 'No token provided' });
     }
-
-    const token = authHeader.replace('Bearer ', '');
 
     // Validate token with external API by calling /api/auth/me
     const response = await axios.get(`${EXTERNAL_AUTH_API}/api/auth/me`, {

@@ -153,10 +153,14 @@ async function extractImageMetadata(filePath, metadata) {
 async function extractPdfMetadata(filePath, metadata) {
   try {
     const dataBuffer = await fs.readFile(filePath);
-    const pdfData = await pdfParse(dataBuffer);
+
+    // pdf-parse v2.4.5 uses PDFParse class
+    const { PDFParse } = pdfParse;
+    const parser = new PDFParse();
+    const pdfData = await parser.parse(dataBuffer);
 
     metadata.documentInfo = {
-      pages: pdfData.numpages,
+      pages: pdfData.numpages || pdfData.numPages || null,
       title: pdfData.info?.Title || null,
       author: pdfData.info?.Author || null,
       subject: pdfData.info?.Subject || null,
