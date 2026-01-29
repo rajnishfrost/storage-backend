@@ -97,7 +97,9 @@ const initializeApp = async () => {
         const signupResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/signup`, {
           name: 'Super Admin',
           email: superAdminEmail,
-          password: superAdminPassword
+          password: superAdminPassword,
+          signup_platform: 'storage',
+          signup_way: 'email'
         });
 
         const { _id: externalUserId } = signupResponse.data;

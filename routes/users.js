@@ -72,7 +72,9 @@ router.post('/', validateExternalToken, isAdmin, async (req, res) => {
       externalResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/signup`, {
         name,
         email,
-        password
+        password,
+        signup_platform: 'storage',
+        signup_way: 'email'
       });
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.response?.data?.error || 'Signup failed';
