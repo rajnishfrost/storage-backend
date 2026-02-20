@@ -35,7 +35,6 @@ const validateExternalToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    // If external API returns 401 or any error, token is invalid
     if (error.response?.status === 401) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }

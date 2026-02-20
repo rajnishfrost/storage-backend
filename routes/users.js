@@ -1,20 +1,46 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const UserDetails = require('../models/UserDetails');
+const File = require('../models/File');
+const Role = require('../models/Role');
 const validateExternalToken = require('../middleware/validateExternalToken');
 const { isAdmin } = require('../middleware/auth');
 
 // Get all users (admin only)
 router.get('/', validateExternalToken, isAdmin, async (req, res) => {
   try {
-    const Role = require('../models/Role');
     const superAdminRole = await Role.findOne({ name: 'super_admin' });
 
     const userDetails = await UserDetails.find({ role: { $ne: superAdminRole._id } })
       .populate('role')
       .sort({ createdAt: -1 });
 
-    res.json(userDetails);
+    // Calculate actual used storage from File collection for each user
+    const usersWithStorage = await Promise.all(
+      userDetails.map(async (user) => {
+        try {
+          const ownerId = new mongoose.Types.ObjectId(user.externalUserId);
+          const storageAgg = await File.aggregate([
+            { $match: { owner: ownerId } },
+            { $group: { _id: null, totalSize: { $sum: '$size' } } }
+          ]);
+          const actualUsed = storageAgg.length > 0 ? storageAgg[0].totalSize : 0;
+
+          // Sync usedStorage if out of date
+          if (user.usedStorage !== actualUsed) {
+            user.usedStorage = actualUsed;
+            await user.save();
+          }
+        } catch (aggErr) {
+          console.error(`Storage calc error for ${user.email}:`, aggErr.message);
+        }
+
+        return user;
+      })
+    );
+
+    res.json(usersWithStorage);
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -34,7 +60,6 @@ router.post('/', validateExternalToken, isAdmin, async (req, res) => {
     }
 
     // Check if role exists
-    const Role = require('../models/Role');
     const roleDoc = await Role.findById(roleId);
     if (!roleDoc) {
       return res.status(400).json({ error: 'Invalid role' });

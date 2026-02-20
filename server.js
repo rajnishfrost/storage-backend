@@ -86,73 +86,57 @@ const initializeApp = async () => {
     const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'superadmin@cloudstore.com';
     const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@123';
 
-    // Check if super admin user_details exists
-    const superAdminExists = await UserDetails.findOne({ role: superAdminRole._id });
+    // Ensure super admin exists in local user_details
+    const superAdminExists = await UserDetails.findOne({ roleName: 'super_admin' });
 
     if (!superAdminExists) {
       try {
-        console.log('Creating super admin in external API...');
+        // Get or create super admin in external API
+        let externalUserId;
 
-        // Try to create super admin in external API
-        const signupResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/signup`, {
-          name: 'Super Admin',
-          email: superAdminEmail,
-          password: superAdminPassword,
-          signup_platform: 'storage',
-          signup_way: 'email'
-        });
+        try {
+          const signupResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/signup`, {
+            name: 'Super Admin',
+            email: superAdminEmail,
+            password: superAdminPassword,
+            signup_platform: 'storage',
+            signup_way: 'seeded'
+          });
+          externalUserId = signupResponse.data._id;
+        } catch (signupError) {
+          // User already exists in external API - login to get their ID
+          const loginResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/login`, {
+            email: superAdminEmail,
+            password: superAdminPassword
+          });
+          externalUserId = loginResponse.data._id;
+        }
 
-        const { _id: externalUserId } = signupResponse.data;
-
-        // Create user_details for super admin
-        await UserDetails.create({
-          externalUserId,
-          name: 'Super Admin',
-          email: superAdminEmail,
-          role: superAdminRole._id,
-          roleName: 'super_admin',
-          storageQuota: 1000, // 1TB for super admin
-          usedStorage: 0,
-          storagePath: process.env.UPLOAD_PATH || './uploads',
-          isActive: true
-        });
-
-        console.log('Super admin created successfully');
-        console.log('Email:', superAdminEmail);
-      } catch (error) {
-        // If signup fails (e.g., user already exists in external API), try to login
-        if (error.response?.status === 400) {
-          console.log('Super admin may already exist in external API, attempting login...');
-
-          try {
-            const loginResponse = await axios.post(`${EXTERNAL_AUTH_API}/api/auth/login`, {
-              email: superAdminEmail,
-              password: superAdminPassword
-            });
-
-            const { _id: externalUserId } = loginResponse.data;
-
-            // Create user_details for existing super admin
-            await UserDetails.create({
-              externalUserId,
+        // Use findOneAndUpdate to handle both cases:
+        // - User doesn't exist → create as super_admin
+        // - User exists with 'user' role (auto-created by /auth/me) → upgrade to super_admin
+        await UserDetails.findOneAndUpdate(
+          { externalUserId },
+          {
+            $set: {
               name: 'Super Admin',
               email: superAdminEmail,
               role: superAdminRole._id,
               roleName: 'super_admin',
-              storageQuota: 1000,
-              usedStorage: 0,
-              storagePath: process.env.UPLOAD_PATH || './uploads',
+              storageQuota: null,
+              storagePath: null,
               isActive: true
-            });
+            },
+            $setOnInsert: {
+              usedStorage: 0
+            }
+          },
+          { upsert: true, new: true }
+        );
 
-            console.log('Super admin user_details created successfully');
-            console.log('Email:', superAdminEmail);
-          } catch (loginError) {
-            console.error('Failed to create/link super admin:', loginError.message);
-          }
-        } else {
-          console.error('Failed to create super admin:', error.message);
-        }
+        console.log('Super admin initialized:', superAdminEmail);
+      } catch (error) {
+        console.error('Failed to initialize super admin:', error.message);
       }
     }
 

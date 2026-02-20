@@ -37,8 +37,7 @@ const userDetailsSchema = new mongoose.Schema({
 
   storageQuota: {
     type: Number,
-    required: true,
-    default: 5 // GB
+    default: 5 // GB, null = unlimited (seeded/super_admin)
   },
 
   usedStorage: {
@@ -48,7 +47,7 @@ const userDetailsSchema = new mongoose.Schema({
 
   storagePath: {
     type: String,
-    default: './uploads'
+    default: './uploads' // null = no dedicated path (seeded/super_admin)
   },
 
   storagePaths: [{
@@ -70,8 +69,9 @@ const userDetailsSchema = new mongoose.Schema({
   collection: 'user_details' // Explicitly set collection name
 });
 
-// Virtual for checking if quota exceeded
+// Virtual for checking if quota exceeded (null quota = unlimited)
 userDetailsSchema.virtual('isQuotaExceeded').get(function() {
+  if (this.storageQuota == null) return false;
   return this.usedStorage >= (this.storageQuota * 1024 * 1024 * 1024);
 });
 
@@ -81,14 +81,16 @@ userDetailsSchema.methods.updateStorage = async function(sizeInBytes) {
   return this.save();
 };
 
-// Method to check available storage
+// Method to check available storage (null quota = Infinity)
 userDetailsSchema.methods.getAvailableStorage = function() {
+  if (this.storageQuota == null) return Infinity;
   const quotaInBytes = this.storageQuota * 1024 * 1024 * 1024;
   return quotaInBytes - this.usedStorage;
 };
 
 // Method to check if user has enough space for a given size
 userDetailsSchema.methods.hasSpace = function(sizeInBytes) {
+  if (this.storageQuota == null) return true;
   const availableStorage = this.getAvailableStorage();
   return availableStorage >= sizeInBytes;
 };

@@ -106,7 +106,14 @@ router.post('/login', async (req, res) => {
     const { _id: externalUserId, name, token } = externalResponse.data;
 
     // 2. Find or create user_details
+    console.log('🔍 [Login] Looking for user with externalUserId:', externalUserId);
     let userDetails = await UserDetails.findOne({ externalUserId }).populate('role');
+    console.log('📦 [Login] Found userDetails:', userDetails ? {
+      _id: userDetails._id,
+      email: userDetails.email,
+      roleName: userDetails.roleName,
+      role: userDetails.role
+    } : 'null');
 
     if (!userDetails) {
       // First-time login: create user_details with default role
@@ -144,7 +151,7 @@ router.post('/login', async (req, res) => {
     }
 
     // 4. Return token and enriched user data
-    res.json({
+    const responseData = {
       token,
       user: {
         id: externalUserId,
@@ -156,7 +163,10 @@ router.post('/login', async (req, res) => {
         usedStorage: userDetails.usedStorage,
         storagePath: userDetails.storagePath
       }
-    });
+    };
+
+    console.log('✅ [Login] Sending response:', JSON.stringify(responseData.user, null, 2));
+    res.json(responseData);
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Server error during login' });
@@ -167,15 +177,36 @@ router.post('/login', async (req, res) => {
 router.get('/me', validateExternalToken, async (req, res) => {
   try {
     // req.user contains { _id, name, email } from external API
-    const userDetails = await UserDetails.findOne({
+    let userDetails = await UserDetails.findOne({
       externalUserId: req.user._id
     }).populate('role');
 
     if (!userDetails) {
-      return res.status(404).json({ error: 'User details not found' });
-    }
+      // First-time user visiting storage - auto-create UserDetails with default 'user' role
+      const defaultRole = await Role.findOne({ name: 'user' });
+      if (!defaultRole) {
+        return res.status(500).json({ error: 'Default role not found. Please contact administrator.' });
+      }
 
-    // External API is source of truth for name/email - no syncing needed
+      userDetails = await UserDetails.create({
+        externalUserId: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        role: defaultRole._id,
+        roleName: 'user',
+        storageQuota: 5,
+        usedStorage: 0,
+        storagePath: './uploads',
+        isActive: true
+      });
+
+      await userDetails.populate('role');
+    } else if (userDetails.name !== req.user.name || userDetails.email !== req.user.email) {
+      // Sync name/email from external API if changed
+      userDetails.name = req.user.name;
+      userDetails.email = req.user.email;
+      await userDetails.save();
+    }
 
     res.json({
       id: req.user._id,
