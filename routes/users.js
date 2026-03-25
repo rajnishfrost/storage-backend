@@ -5,10 +5,10 @@ const UserDetails = require('../models/UserDetails');
 const File = require('../models/File');
 const Role = require('../models/Role');
 const validateExternalToken = require('../middleware/validateExternalToken');
-const { isAdmin } = require('../middleware/auth');
+const { isAdmin, hasModule } = require('../middleware/auth');
 
 // Get all users (admin only)
-router.get('/', validateExternalToken, isAdmin, async (req, res) => {
+router.get('/', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const superAdminRole = await Role.findOne({ name: 'super_admin' });
 
@@ -48,7 +48,7 @@ router.get('/', validateExternalToken, isAdmin, async (req, res) => {
 });
 
 // Create new user (admin only) - Creates user in external API + local user_details
-router.post('/', validateExternalToken, isAdmin, async (req, res) => {
+router.post('/', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const axios = require('axios');
     const { name, email, password, roleId, storageQuota, storagePath } = req.body;
@@ -139,7 +139,7 @@ router.post('/', validateExternalToken, isAdmin, async (req, res) => {
 });
 
 // Update user (admin only) - Updates user_details only (passwords managed via external API)
-router.put('/:userId', validateExternalToken, isAdmin, async (req, res) => {
+router.put('/:userId', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { userId } = req.params;
     const { storageQuota, storagePath, isActive, roleId } = req.body;
@@ -218,7 +218,7 @@ router.put('/:userId', validateExternalToken, isAdmin, async (req, res) => {
 });
 
 // Delete user (admin only) - Deletes user_details only (external API user remains)
-router.delete('/:userId', validateExternalToken, isAdmin, async (req, res) => {
+router.delete('/:userId', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { userId } = req.params;
 

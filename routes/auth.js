@@ -7,6 +7,8 @@ const validateExternalToken = require('../middleware/validateExternalToken');
 
 const EXTERNAL_AUTH_API = process.env.EXTERNAL_AUTH_API || 'http://161.118.173.163:4000';
 
+const ALL_ADMIN_MODULES = ['user-management', 'ss-management', 'role-management'];
+
 // Signup route - Create user in external API + local user_details
 router.post('/signup', async (req, res) => {
   try {
@@ -58,6 +60,10 @@ router.post('/signup', async (req, res) => {
       }
 
       // 3. Return token and enriched user data
+      const modules = roleDoc.name === 'super_admin'
+        ? ALL_ADMIN_MODULES
+        : (roleDoc.modules || []);
+
       res.status(201).json({
         token,
         user: {
@@ -68,7 +74,8 @@ router.post('/signup', async (req, res) => {
           roleId: roleDoc._id,
           storageQuota: userDetails.storageQuota,
           usedStorage: userDetails.usedStorage,
-          storagePath: userDetails.storagePath
+          storagePath: userDetails.storagePath,
+          modules
         }
       });
     } catch (dbError) {
@@ -106,14 +113,7 @@ router.post('/login', async (req, res) => {
     const { _id: externalUserId, name, token } = externalResponse.data;
 
     // 2. Find or create user_details
-    console.log('🔍 [Login] Looking for user with externalUserId:', externalUserId);
     let userDetails = await UserDetails.findOne({ externalUserId }).populate('role');
-    console.log('📦 [Login] Found userDetails:', userDetails ? {
-      _id: userDetails._id,
-      email: userDetails.email,
-      roleName: userDetails.roleName,
-      role: userDetails.role
-    } : 'null');
 
     if (!userDetails) {
       // First-time login: create user_details with default role
@@ -151,6 +151,10 @@ router.post('/login', async (req, res) => {
     }
 
     // 4. Return token and enriched user data
+    const modules = userDetails.roleName === 'super_admin'
+      ? ALL_ADMIN_MODULES
+      : (userDetails.role?.modules || []);
+
     const responseData = {
       token,
       user: {
@@ -161,11 +165,11 @@ router.post('/login', async (req, res) => {
         roleId: userDetails.role._id,
         storageQuota: userDetails.storageQuota,
         usedStorage: userDetails.usedStorage,
-        storagePath: userDetails.storagePath
+        storagePath: userDetails.storagePath,
+        modules
       }
     };
 
-    console.log('✅ [Login] Sending response:', JSON.stringify(responseData.user, null, 2));
     res.json(responseData);
   } catch (error) {
     console.error('Login error:', error);
@@ -208,6 +212,10 @@ router.get('/me', validateExternalToken, async (req, res) => {
       await userDetails.save();
     }
 
+    const modules = userDetails.roleName === 'super_admin'
+      ? ALL_ADMIN_MODULES
+      : (userDetails.role?.modules || []);
+
     res.json({
       id: req.user._id,
       name: req.user.name,
@@ -216,7 +224,8 @@ router.get('/me', validateExternalToken, async (req, res) => {
       roleId: userDetails.role._id,
       storageQuota: userDetails.storageQuota,
       usedStorage: userDetails.usedStorage,
-      storagePath: userDetails.storagePath
+      storagePath: userDetails.storagePath,
+      modules
     });
   } catch (error) {
     console.error('Get user error:', error);

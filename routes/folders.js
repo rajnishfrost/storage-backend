@@ -5,6 +5,7 @@ const fs = require('fs-extra');
 const Folder = require('../models/Folder');
 const File = require('../models/File');
 const UserDetails = require('../models/UserDetails');
+const Share = require('../models/Share');
 const validateExternalToken = require('../middleware/validateExternalToken');
 
 // Get all folders for current user (all folders regardless of parent)
@@ -350,6 +351,53 @@ router.post('/bulk-copy', validateExternalToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Bulk copy folders error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Browse shared folder contents (for authenticated shared-with-me users)
+router.get('/shared/:folderId', validateExternalToken, async (req, res) => {
+  try {
+    const { folderId } = req.params;
+
+    // Check if user has share access to this folder (or any parent)
+    const folder = await Folder.findById(folderId);
+    if (!folder) {
+      return res.status(404).json({ error: 'Folder not found' });
+    }
+
+    // Check direct share on this folder or any ancestor
+    let currentId = folderId;
+    let hasAccess = false;
+
+    while (currentId) {
+      const share = await Share.findOne({
+        itemId: currentId, itemType: 'folder', isActive: true,
+        $or: [
+          { 'sharedWith.email': req.user.email },
+          { 'sharedWith.userId': req.user._id }
+        ]
+      });
+      if (share) {
+        hasAccess = true;
+        break;
+      }
+      const parentFolder = await Folder.findById(currentId);
+      currentId = parentFolder?.parent || null;
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [folders, files] = await Promise.all([
+      Folder.find({ parent: folderId }).select('name createdAt').sort({ name: 1 }),
+      File.find({ folder: folderId }).select('originalName name mimeType size fileType createdAt _id').sort({ createdAt: -1 })
+    ]);
+
+    res.json({ folders, files });
+  } catch (error) {
+    console.error('Shared folder browse error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

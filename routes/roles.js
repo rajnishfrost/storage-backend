@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Role = require('../models/Role');
 const validateExternalToken = require('../middleware/validateExternalToken');
-const { isSuperAdmin } = require('../middleware/auth');
+const { isSuperAdmin, hasModule } = require('../middleware/auth');
 
 // Get all roles
 router.get('/', validateExternalToken, async (req, res) => {
@@ -15,13 +15,18 @@ router.get('/', validateExternalToken, async (req, res) => {
   }
 });
 
-// Create new role (super admin only)
-router.post('/', validateExternalToken, isSuperAdmin, async (req, res) => {
+// Create new role (requires role-management module)
+router.post('/', validateExternalToken, hasModule('role-management'), async (req, res) => {
   try {
-    const { name, displayName, description, permissions } = req.body;
+    const { name, displayName, description, permissions, modules } = req.body;
 
     if (!name || !displayName) {
       return res.status(400).json({ error: 'Name and display name are required' });
+    }
+
+    // Validate role name format
+    if (!/^[a-z0-9_]+$/.test(name)) {
+      return res.status(400).json({ error: 'Role name must contain only lowercase letters, numbers, and underscores' });
     }
 
     // Check if role already exists
@@ -35,6 +40,7 @@ router.post('/', validateExternalToken, isSuperAdmin, async (req, res) => {
       displayName,
       description: description || '',
       permissions: permissions || [],
+      modules: modules || [],
       isSystemRole: false,
       createdBy: req.user._id
     });
@@ -47,11 +53,11 @@ router.post('/', validateExternalToken, isSuperAdmin, async (req, res) => {
   }
 });
 
-// Update role (super admin only)
-router.put('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) => {
+// Update role (requires role-management module)
+router.put('/:roleId', validateExternalToken, hasModule('role-management'), async (req, res) => {
   try {
     const { roleId } = req.params;
-    const { displayName, description, permissions } = req.body;
+    const { displayName, description, permissions, modules } = req.body;
 
     const role = await Role.findById(roleId);
 
@@ -59,15 +65,16 @@ router.put('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) => 
       return res.status(404).json({ error: 'Role not found' });
     }
 
-    // Prevent modifying system roles' name and core permissions
-    if (role.isSystemRole) {
-      return res.status(403).json({ error: 'Cannot modify system role properties' });
+    // Prevent modifying super_admin role
+    if (role.name === 'super_admin') {
+      return res.status(403).json({ error: 'Cannot modify super admin role' });
     }
 
     // Update fields
     if (displayName) role.displayName = displayName;
     if (description !== undefined) role.description = description;
     if (permissions) role.permissions = permissions;
+    if (modules) role.modules = modules;
 
     await role.save();
     res.json(role);
@@ -77,8 +84,8 @@ router.put('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) => 
   }
 });
 
-// Delete role (super admin only)
-router.delete('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) => {
+// Delete role (requires role-management module)
+router.delete('/:roleId', validateExternalToken, hasModule('role-management'), async (req, res) => {
   try {
     const { roleId } = req.params;
 
@@ -88,9 +95,9 @@ router.delete('/:roleId', validateExternalToken, isSuperAdmin, async (req, res) 
       return res.status(404).json({ error: 'Role not found' });
     }
 
-    // Prevent deleting system roles
-    if (role.isSystemRole) {
-      return res.status(403).json({ error: 'Cannot delete system role' });
+    // Prevent deleting super_admin role
+    if (role.name === 'super_admin') {
+      return res.status(403).json({ error: 'Cannot delete super admin role' });
     }
 
     // Check if any users have this role

@@ -8,6 +8,7 @@ const Folder = require('../models/Folder');
 const UserDetails = require('../models/UserDetails');
 const validateExternalToken = require('../middleware/validateExternalToken');
 const { extractMetadata } = require('../utils/metadataExtractor');
+const Share = require('../models/Share');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -52,14 +53,19 @@ const upload = multer({
 // Get all files for current user with pagination
 router.get('/', validateExternalToken, async (req, res) => {
   try {
-    const { folder, page = 1, limit = 100 } = req.query;
+    const { folder, page = 1, limit = 100, fileType } = req.query;
 
     const query = { owner: req.user._id };
 
     if (folder) {
       query.folder = folder;
-    } else {
-      query.folder = null; // Root files
+    } else if (!fileType) {
+      query.folder = null; // Root files (skip folder filter when filtering by type across all)
+    }
+
+    // Filter by file type if specified
+    if (fileType && fileType !== 'all') {
+      query.fileType = fileType;
     }
 
     // Calculate pagination
@@ -203,7 +209,22 @@ router.get('/download/:fileId', validateExternalToken, async (req, res) => {
   try {
     const { fileId } = req.params;
 
-    const file = await File.findOne({ _id: fileId, owner: req.user._id });
+    // Check ownership first, then share access
+    let file = await File.findOne({ _id: fileId, owner: req.user._id });
+
+    if (!file) {
+      file = await File.findById(fileId);
+      if (file) {
+        const share = await Share.findOne({
+          itemId: fileId, itemType: 'file', isActive: true,
+          $or: [
+            { 'sharedWith.email': req.user.email },
+            { 'sharedWith.userId': req.user._id }
+          ]
+        });
+        if (!share) file = null;
+      }
+    }
 
     if (!file) {
       return res.status(404).json({ error: 'File not found' });
@@ -227,7 +248,22 @@ router.get('/view/:fileId', validateExternalToken, async (req, res) => {
   try {
     const { fileId } = req.params;
 
-    const file = await File.findOne({ _id: fileId, owner: req.user._id });
+    // Check ownership first, then share access
+    let file = await File.findOne({ _id: fileId, owner: req.user._id });
+
+    if (!file) {
+      file = await File.findById(fileId);
+      if (file) {
+        const share = await Share.findOne({
+          itemId: fileId, itemType: 'file', isActive: true,
+          $or: [
+            { 'sharedWith.email': req.user.email },
+            { 'sharedWith.userId': req.user._id }
+          ]
+        });
+        if (!share) file = null;
+      }
+    }
 
     if (!file) {
       return res.status(404).json({ error: 'File not found' });

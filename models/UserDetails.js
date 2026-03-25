@@ -31,7 +31,6 @@ const userDetailsSchema = new mongoose.Schema({
   // Cached role name for quick access (avoid populate on every request)
   roleName: {
     type: String,
-    enum: ['user', 'admin', 'super_admin'],
     default: 'user'
   },
 

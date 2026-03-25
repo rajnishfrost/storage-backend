@@ -10,6 +10,9 @@ const roleRoutes = require('./routes/roles');
 const fileRoutes = require('./routes/files');
 const folderRoutes = require('./routes/folders');
 const adminRoutes = require('./routes/admin');
+const systemStorageRoutes = require('./routes/systemStorage');
+const shareRoutes = require('./routes/shares');
+const publicRoutes = require('./routes/public');
 
 const app = express();
 
@@ -25,6 +28,9 @@ app.use('/api/roles', roleRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/system-storage', systemStorageRoutes);
+app.use('/api/shares', shareRoutes);
+app.use('/api/public', publicRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -49,6 +55,7 @@ const initializeApp = async () => {
         displayName: 'Super Admin',
         description: 'Full system access with all permissions',
         permissions: ['read_files', 'write_files', 'delete_files', 'manage_users', 'manage_roles', 'view_analytics', 'system_settings'],
+        modules: ['user-management', 'ss-management', 'role-management'],
         isSystemRole: true
       },
       {
@@ -56,6 +63,7 @@ const initializeApp = async () => {
         displayName: 'Admin',
         description: 'Administrative access with user management',
         permissions: ['read_files', 'write_files', 'delete_files', 'manage_users', 'view_analytics'],
+        modules: ['user-management'],
         isSystemRole: true
       },
       {
@@ -63,6 +71,7 @@ const initializeApp = async () => {
         displayName: 'User',
         description: 'Standard user with basic file access',
         permissions: ['read_files', 'write_files', 'delete_files'],
+        modules: [],
         isSystemRole: true
       }
     ];
@@ -73,6 +82,14 @@ const initializeApp = async () => {
         await Role.create(roleData);
         console.log(`Created default role: ${roleData.displayName}`);
       }
+    }
+
+    // Migration: ensure existing system roles have modules field
+    for (const roleData of defaultRoles) {
+      await Role.updateOne(
+        { name: roleData.name, $or: [{ modules: { $exists: false } }, { modules: { $size: 0 }, name: { $ne: 'user' } }] },
+        { $set: { modules: roleData.modules } }
+      );
     }
 
     // Get role IDs

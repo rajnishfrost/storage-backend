@@ -28,6 +28,14 @@ const roleSchema = new mongoose.Schema({
       'system_settings'
     ]
   }],
+  modules: [{
+    type: String,
+    enum: [
+      'user-management',
+      'ss-management',
+      'role-management'
+    ]
+  }],
   isSystemRole: {
     type: Boolean,
     default: false // System roles (super_admin, admin, user) cannot be deleted

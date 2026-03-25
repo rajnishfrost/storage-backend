@@ -6,10 +6,10 @@ const UserDetails = require('../models/UserDetails');
 const File = require('../models/File');
 const Folder = require('../models/Folder');
 const validateExternalToken = require('../middleware/validateExternalToken');
-const { requireAdmin } = require('../middleware/auth');
+const { requireAdmin, hasModule } = require('../middleware/auth');
 
 // Get storage paths with disk space info
-router.get('/storage-paths', validateExternalToken, requireAdmin, async (req, res) => {
+router.get('/storage-paths', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const userDetails = await UserDetails.findOne({ externalUserId: req.user._id });
 
@@ -57,7 +57,7 @@ router.get('/storage-paths', validateExternalToken, requireAdmin, async (req, re
 });
 
 // Add storage path
-router.post('/storage-paths', validateExternalToken, requireAdmin, async (req, res) => {
+router.post('/storage-paths', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { path: storagePath } = req.body;
 
@@ -128,7 +128,7 @@ router.post('/storage-paths', validateExternalToken, requireAdmin, async (req, r
 });
 
 // Browse server folders (for selecting storage paths)
-router.get('/browse-folders', validateExternalToken, requireAdmin, async (req, res) => {
+router.get('/browse-folders', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     let browsePath = req.query.path || '/';
 
@@ -197,7 +197,7 @@ router.get('/browse-folders', validateExternalToken, requireAdmin, async (req, r
 });
 
 // Create a new folder on the server
-router.post('/create-folder', validateExternalToken, requireAdmin, async (req, res) => {
+router.post('/create-folder', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { parentPath, folderName } = req.body;
 
@@ -240,7 +240,7 @@ router.post('/create-folder', validateExternalToken, requireAdmin, async (req, r
 });
 
 // Delete a folder from the server
-router.delete('/delete-folder', validateExternalToken, requireAdmin, async (req, res) => {
+router.delete('/delete-folder', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { folderPath } = req.body;
 
@@ -283,7 +283,7 @@ router.delete('/delete-folder', validateExternalToken, requireAdmin, async (req,
 });
 
 // Remove storage path
-router.delete('/storage-paths', validateExternalToken, requireAdmin, async (req, res) => {
+router.delete('/storage-paths', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { path: storagePath } = req.body;
 
@@ -330,7 +330,7 @@ router.delete('/storage-paths', validateExternalToken, requireAdmin, async (req,
 });
 
 // Get user's folders (admin view)
-router.get('/user-folders/:userId', validateExternalToken, requireAdmin, async (req, res) => {
+router.get('/user-folders/:userId', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { userId } = req.params;
     const { parent } = req.query;
@@ -357,7 +357,7 @@ router.get('/user-folders/:userId', validateExternalToken, requireAdmin, async (
 });
 
 // Get user's files (admin view) with pagination
-router.get('/user-files/:userId', validateExternalToken, requireAdmin, async (req, res) => {
+router.get('/user-files/:userId', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { userId } = req.params;
     const { folder, page = 1, limit = 50 } = req.query;
@@ -400,7 +400,7 @@ router.get('/user-files/:userId', validateExternalToken, requireAdmin, async (re
 });
 
 // View/stream any file (admin only) - same as /files/view but without owner check
-router.get('/view-file/:fileId', validateExternalToken, requireAdmin, async (req, res) => {
+router.get('/view-file/:fileId', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { fileId } = req.params;
     const file = await File.findById(fileId);
@@ -441,7 +441,7 @@ router.get('/view-file/:fileId', validateExternalToken, requireAdmin, async (req
 });
 
 // Download file (admin only)
-router.get('/download-file/:fileId', validateExternalToken, requireAdmin, async (req, res) => {
+router.get('/download-file/:fileId', validateExternalToken, hasModule('user-management'), async (req, res) => {
   try {
     const { fileId } = req.params;
     const file = await File.findById(fileId);

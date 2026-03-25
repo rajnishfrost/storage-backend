@@ -52,4 +52,36 @@ const isSuperAdmin = async (req, res, next) => {
   }
 };
 
-module.exports = { isAdmin, isSuperAdmin, requireAdmin: isAdmin };
+// Check if user's role has access to a specific admin module
+// This middleware should be used AFTER validateExternalToken
+const hasModule = (moduleName) => async (req, res, next) => {
+  try {
+    const userDetails = await UserDetails.findOne({
+      externalUserId: req.user._id
+    }).populate('role');
+
+    if (!userDetails) {
+      return res.status(403).json({ error: 'User details not found' });
+    }
+
+    // super_admin always has access to all modules
+    if (userDetails.roleName === 'super_admin') {
+      req.userDetails = userDetails;
+      return next();
+    }
+
+    // Check if role has the required module
+    const roleModules = userDetails.role?.modules || [];
+    if (roleModules.includes(moduleName)) {
+      req.userDetails = userDetails;
+      return next();
+    }
+
+    res.status(403).json({ error: 'Access denied. You do not have access to this module.' });
+  } catch (error) {
+    console.error('hasModule error:', error);
+    res.status(500).json({ error: 'Authorization check failed' });
+  }
+};
+
+module.exports = { isAdmin, isSuperAdmin, requireAdmin: isAdmin, hasModule };
