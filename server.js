@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
 require('dotenv').config();
 
@@ -16,8 +17,33 @@ const publicRoutes = require('./routes/public');
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// Security middleware
+// First-party origins only. Override with CORS_ORIGINS env (comma-separated) if needed.
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
+  : [
+      'https://lackoff.com',
+      'https://myhabits.lackoff.com',
+      'https://storage.lackoff.com',
+      'https://familytrees.lackoff.com',
+      'https://rj.lackoff.com',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+      'http://localhost:3003',
+      'http://localhost:3004',
+    ];
+const corsOptions = {
+  origin(origin, cb) {
+    // allow non-browser callers (curl, server-to-server) that send no Origin
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+};
+
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' })); // Increase JSON body limit
 app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Increase URL-encoded body limit
 
@@ -157,9 +183,9 @@ const initializeApp = async () => {
       }
     }
 
-    // Start server - bind to 0.0.0.0 to allow network access
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on port ${PORT}`);
+    // Start server - bind to localhost only (reached via nginx reverse proxy)
+    app.listen(PORT, '127.0.0.1', () => {
+      console.log(`Server running on port ${PORT} (localhost only, behind nginx)`);
       console.log(`Local: http://localhost:${PORT}`);
     });
   } catch (error) {
